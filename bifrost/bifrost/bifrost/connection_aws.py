@@ -9,7 +9,7 @@ from settings.config import logger
 
 __version__ = '3.0.0'
 
-AWS_ID_ORGANIZATION = environ.get('AWS_ID_ORGANIZATION', '242956272159')
+AWS_ID_ORGANIZATION = environ.get('AWS_ID_ORGANIZATION', '907015885877')
 
 
 def connect(service, region):
