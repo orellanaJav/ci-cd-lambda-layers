@@ -1,0 +1,156 @@
+name: Deploy Layer
+
+on:
+  push:
+    # branches-ignore:
+    #   - '**'
+    branches:
+      - 'dev'
+env:
+  DEV_REGION: sa-east-1
+  RELEASE_REGION: us-east-1
+  PROD_REGION: us-east-1
+
+jobs:
+  get-stage-and-region:
+    name: Get Stage And Region by Branch
+    runs-on: ubuntu-latest
+    outputs:
+      region: ${{ steps.stage-and-region.outputs.region }}
+      stage: ${{ steps.stage-and-region.outputs.stage }}
+    steps:
+      - name: Get Current Branch
+        shell: bash
+        run: echo "##[set-output name=branch;]$(echo ${GITHUB_REF#refs/heads/})"
+        id: extract_current_branch
+
+      - name: Set Region For Dev
+        run: |
+          echo "STAGE=dev" >> $GITHUB_ENV
+          echo "REGION=$DEV_REGION" >> $GITHUB_ENV
+        if: ${{ steps.extract_current_branch.outputs.branch == 'dev' }}
+
+      - name: Set Region For Crafting
+        run: |
+          echo "STAGE=dev" >> $GITHUB_ENV
+          echo "REGION=$DEV_REGION" >> $GITHUB_ENV
+        if: ${{ steps.extract_current_branch.outputs.branch == 'crafting' }}
+
+      - name: Set Region For Release
+        run: |
+          echo "STAGE=release" >> $GITHUB_ENV
+          echo "REGION=$RELEASE_REGION" >> $GITHUB_ENV
+        if: ${{ steps.extract_current_branch.outputs.branch == 'release' }}
+
+      - name: Set Region For Production
+        run: |
+          echo "STAGE=prod" >> $GITHUB_ENV
+          echo "REGION=$PROD_REGION" >> $GITHUB_ENV
+        if: ${{ steps.extract_current_branch.outputs.branch == 'main' }}
+
+      - name: Get Stage And Region
+        id: stage-and-region
+        run: |
+          STAGE="${{ env.STAGE }}"
+          REGION="${{ env.REGION }}"
+          echo "::set-output name=stage::$( echo "$STAGE" )"
+          echo "::set-output name=region::$( echo "$REGION" )"
+
+  
+  changes:
+    name: Changes
+    runs-on: ubuntu-latest
+    outputs:
+      folders: ${{ steps.filter.outputs.folders }}
+    steps:
+      - uses: actions/checkout@v2
+      - name: Check changed files
+        id: diff
+        run: |
+          git fetch origin ${{ github.event.before }} --depth=1
+          export DIFF=$( git diff --diff-filter=d --name-only ${{ github.event.before }} $GITHUB_SHA )
+          echo "Diff between ${{ github.event.before }} and $GITHUB_SHA"
+          echo "$DIFF"
+          # Escape newlines (replace \n with %0A)
+          echo "::set-output name=diff::$( echo "$DIFF" | sed ':a;N;$!ba;s/\n/%0A/g' )"
+      - name: Set matrix for build
+        id: filter
+        run: |
+          DIFF="${{ steps.diff.outputs.diff }}"
+          if [ -z "$DIFF" ]; then
+            echo "::set-output name=folders::[]"
+          else
+            JSON="["
+            # Loop by lines
+            while read path; do
+              # Set $directory to substring before /
+              directory="$( echo $path | cut -d'/' -f1 -s )"
+            # ignore .github folder
+            if [[ "$directory" != ".github" ]]; then
+              # Add build to the matrix only if it is not already included
+              JSONline="\"$directory\","
+              if [[ "$JSON" != *"$JSONline"* ]]; then
+                JSON="$JSON$JSONline"
+              fi
+            fi
+            done <<< "$DIFF"
+            # Remove last "," and add closing brackets
+            if [[ $JSON == *, ]]; then
+              JSON="${JSON%?}"
+            fi
+            JSON="$JSON]"
+            echo $JSON
+            # Set output
+            echo "::set-output name=folders::$( echo "$JSON" )"
+          fi
+
+  deploy:
+    needs: [get-stage-and-region, changes]
+    name: Deploy
+    if: ${{ needs.changes.outputs.folders != '[]' }}
+    strategy:
+      matrix:
+        folder: ${{ fromJSON(needs.changes.outputs.folders) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Cache node_modules
+        uses: actions/cache@v1
+        with:
+          path: ~/.npm
+          key: node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            node-
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v3        
+        with:
+          python-version: '3.9'
+      
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Deploy Layer
+        working-directory: ${{ matrix.folder }}
+        id: deploy-layer
+        run: |
+          ls -la
+          pwd
+          echo "${{ matrix.folder }}"
+          STAGE="${{ needs.get-stage-and-region.outputs.stage }}"
+          REGION="${{ needs.get-stage-and-region.outputs.region }}"
+          mkdir ./python
+          pip3 install -r setup/requirements -t python
+          cp -a ${{ matrix.folder }}/. python/
+          zip -r layer.zip python
+          rm -rf python
+          npx serverless deploy --stage $STAGE --region $REGION
+          rm -rf layer.zip

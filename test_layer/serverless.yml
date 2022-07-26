@@ -1,0 +1,22 @@
+	
+# serverless.yml
+service: myService
+custom:
+  bucket: ${param:bucket, "serverless-stack-deployments"}
+  pythonRequirements:
+    dockerizePip: non-linux
+  runtime: ${param:runtime, "python3.9"}
+
+provider:
+  deploymentBucket:
+    name: ${opt:stage, "dev"}-${self:custom.bucket}
+  name: aws
+  region: ${opt:region, "sa-east-1"}
+
+layers:
+  layerTest:
+    compatibleRuntimes:
+      - python3.8
+      - ${self:custom.runtime}
+    package:
+      artifact: layer.zip

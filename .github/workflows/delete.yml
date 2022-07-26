@@ -1,0 +1,182 @@
+name: Delete Layer
+
+on:
+  push:
+    # branches-ignore:
+    #   - '**'
+    branches:
+      - 'dev'
+env:
+  DEV_REGION: sa-east-1
+  RELEASE_REGION: us-east-1
+  PROD_REGION: us-east-1
+
+jobs:
+  get-stage-and-region:
+    name: Get Stage And Region by Branch
+    runs-on: ubuntu-latest
+    outputs:
+      region: ${{ steps.stage-and-region.outputs.region }}
+      stage: ${{ steps.stage-and-region.outputs.stage }}
+    steps:
+      - name: Get Current Branch
+        shell: bash
+        run: echo "##[set-output name=branch;]$(echo ${GITHUB_REF#refs/heads/})"
+        id: extract_current_branch
+
+      - name: Set Region For Dev
+        run: |
+          echo "STAGE=dev" >> $GITHUB_ENV
+          echo "REGION=$DEV_REGION" >> $GITHUB_ENV
+        if: ${{ steps.extract_current_branch.outputs.branch == 'dev' }}
+
+      - name: Set Region For Crafting
+        run: |
+          echo "STAGE=dev" >> $GITHUB_ENV
+          echo "REGION=$DEV_REGION" >> $GITHUB_ENV
+        if: ${{ steps.extract_current_branch.outputs.branch == 'crafting' }}
+
+      - name: Set Region For Release
+        run: |
+          echo "STAGE=release" >> $GITHUB_ENV
+          echo "REGION=$RELEASE_REGION" >> $GITHUB_ENV
+        if: ${{ steps.extract_current_branch.outputs.branch == 'release' }}
+
+      - name: Set Region For Production
+        run: |
+          echo "STAGE=prod" >> $GITHUB_ENV
+          echo "REGION=$PROD_REGION" >> $GITHUB_ENV
+        if: ${{ steps.extract_current_branch.outputs.branch == 'main' }}
+
+      - name: Get Stage And Region
+        id: stage-and-region
+        run: |
+          STAGE="${{ env.STAGE }}"
+          REGION="${{ env.REGION }}"
+          echo "::set-output name=stage::$( echo "$STAGE" )"
+          echo "::set-output name=region::$( echo "$REGION" )"
+
+  
+  changes:
+    name: Changes
+    runs-on: ubuntu-latest
+    outputs:
+      layers-to-remove: ${{ steps.filter.outputs.layers-to-remove }}
+    steps:
+      - uses: actions/checkout@v2
+      - name: Check changed files
+        id: diff
+        run: |
+          git fetch origin ${{ github.event.before }} --depth=1
+          export DIFF=$( git diff --diff-filter=D --name-only ${{ github.event.before }} $GITHUB_SHA )
+          echo "Diff between ${{ github.event.before }} and $GITHUB_SHA"
+          echo "$DIFF"
+          # Escape newlines (replace \n with %0A)
+          echo "::set-output name=diff::$( echo "$DIFF" | sed ':a;N;$!ba;s/\n/%0A/g' )"
+      - name: Set matrix for delete
+        id: filter
+        run: |
+          DIFF="${{ steps.diff.outputs.diff }}"
+
+          # Genera el archivo inicial que contendra la cantidad de archivos
+          # eliminados por stack y servicios lambda.
+          jq -n '[]' > initial_json.json
+          json_file=$(jq . initial_json.json)
+          INITIAL_DIRECTORY=$(pwd)
+          git checkout ${{ github.event.before }}
+
+          if [ -z "$DIFF" ]; then
+            echo "::set-output name=folders::[]"
+          else
+            while read path; do
+              # Set $directory to substring before /
+              directory="$( echo $path | cut -d'/' -f1 -s )"
+              # ignore .github folder
+              if [[ "$directory" != ".github" ]]; then
+                # Ingresa a la carpeta del layer que contiene archivos eliminados
+                # para obtener el total inicial de archivos.
+                cd "$directory"
+                initial_files_in_layer=$(git ls-files | wc -l)
+
+                # Vuelve al directorio inicial
+                cd $INITIAL_DIRECTORY
+
+                # Obtiene los datos del layer en el caso de que ya tenga datos
+                # de archivos eliminados en el archivo json creado.
+                DATA_LAYER=$(echo "$json_file" | jq -c '.[] | select(.layer_name == "'$directory'")')
+
+
+                # Se encarga de armar objeto json con todos los archivos eliminados en un layer
+                if [[ "$DATA_LAYER" ]]; then
+                    COUNT_DELETED_FILES_LAYER=$( echo "$DATA_LAYER" | jq -r '.files_deleted_in_layer' )
+                    COUNT_DELETED_FILES_LAYER=$((COUNT_DELETED_FILES_LAYER + 1))
+                    if [[ "$COUNT_DELETED_FILES_LAYER" == "$initial_files_in_layer" ]]; then
+                        jq '(.[] | select(.layer_name == "'$directory'")).delete_full_layer = true' initial_json.json > tmp_json.json
+                        json_file=$(jq . tmp_json.json)
+                        echo "$json_file" > initial_json.json
+                    fi
+                    jq --arg new_key "$COUNT_DELETED_FILES_LAYER" '(.[] | select(.layer_name == "'$directory'")).files_deleted_in_layer |= $new_key' initial_json.json > tmp_json.json
+                    json_file=$(jq . tmp_json.json)
+                    echo "$json_file" > initial_json.json
+                else
+                    jq '.[. | length] |= . + {"layer_name": "'$directory'", "files_deleted_in_layer": "1", "initial_files_in_layer": '$initial_files_in_layer', "delete_full_layer": false }' initial_json.json > tmp_json.json
+                    json_file=$(jq . tmp_json.json)
+                    echo "$json_file" > initial_json.json
+                fi
+              fi
+            done <<< "$DIFF"
+          fi
+          json_file=$(jq -c . initial_json.json)
+          echo "::set-output name=layers-to-remove::$( echo "$json_file" )"
+
+  remove:
+    needs: [get-stage-and-region, changes]
+    name: Remove
+    if: ${{ needs.changes.outputs.layers-to-remove != '[]' && needs.changes.outputs.layers-to-remove != '' }}
+    strategy:
+      matrix:
+        layers: ${{ fromJSON(needs.changes.outputs.layers-to-remove) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        if: ${{ matrix.layers.delete_full_layer == true }}
+      - name: Fetch Event Before
+        if: ${{ matrix.layers.delete_full_layer == true }}
+        run: |
+          git fetch origin ${{ github.event.before }} --depth=1
+
+      - name: Cache node_modules
+        if: ${{ matrix.layers.delete_full_layer == true }}
+        uses: actions/cache@v1
+        with:
+          path: ~/.npm
+          key: node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            node-
+
+      - name: Configure AWS Credentials
+        if: ${{ matrix.layers.delete_full_layer == true }}
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Setup Python
+        if: ${{ matrix.layers.delete_full_layer == true }}
+        uses: actions/setup-python@v3        
+        with:
+          python-version: '3.9'
+      
+      - name: Install Dependencies
+        if: ${{ matrix.layers.delete_full_layer == true }}
+        run: npm install
+
+      - name: Remove Layer
+        if: ${{ matrix.layers.delete_full_layer == true }}
+        run: |
+          git checkout ${{ github.event.before }}
+          cd ${{ matrix.layers.layer_name }}
+          STAGE="${{ needs.get-stage-and-region.outputs.stage }}"
+          REGION="${{ needs.get-stage-and-region.outputs.region }}"
+          npx serverless remove --stage $STAGE --region $REGION
