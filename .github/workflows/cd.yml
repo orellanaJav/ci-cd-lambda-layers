@@ -142,15 +142,13 @@ jobs:
         working-directory: ${{ matrix.folder }}
         id: deploy-layer
         run: |
-          ls -la
-          pwd
           echo "${{ matrix.folder }}"
           STAGE="${{ needs.get-stage-and-region.outputs.stage }}"
           REGION="${{ needs.get-stage-and-region.outputs.region }}"
           mkdir ./python
           pip3 install -r setup/requirements -t python
           cp -a ${{ matrix.folder }}/. python/
-          zip -r layer.zip python
+          zip -r ${{ matrix.folder }}.zip python
           rm -rf python
           npx serverless deploy --stage $STAGE --region $REGION
-          rm -rf layer.zip
+          rm -rf ${{ matrix.folder }}.zip
