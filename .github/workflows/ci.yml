@@ -1,15 +1,14 @@
-name: Deploy Layer
-
+name: CI Layers
 on:
-  push:
-    # branches-ignore:
-    #   - '**'
+  pull_request:
     branches:
-      - 'dev'
-      - 'release'
-      - 'main'
+     - dev
+     - release
+     - prod
+     - crafting
+
 env:
-  DEV_REGION: sa-east-1
+  DEV_REGION: sa-east-1  
   RELEASE_REGION: us-east-1
   PROD_REGION: us-east-1
 
@@ -55,9 +54,14 @@ jobs:
         run: |
           STAGE="${{ env.STAGE }}"
           REGION="${{ env.REGION }}"
+          if [ -z "$STAGE" ]; then
+            STAGE="dev"
+          fi
+          if [ -z "$REGION" ]; then
+            REGION="$DEV_REGION"
+          fi
           echo "::set-output name=stage::$( echo "$STAGE" )"
           echo "::set-output name=region::$( echo "$REGION" )"
-
   
   changes:
     name: Changes
@@ -106,51 +110,103 @@ jobs:
             echo "::set-output name=folders::$( echo "$JSON" )"
           fi
 
-  deploy:
-    needs: [get-stage-and-region, changes]
-    name: Deploy
-    if: ${{ needs.changes.outputs.folders != '[]' }}
+  tests:
+    needs: [changes, get-stage-and-region]
+    name: Tests
+    if: ${{ needs.changes.outputs.folders != '[]' && needs.changes.outputs.folders != '' }}
     strategy:
       matrix:
         folder: ${{ fromJSON(needs.changes.outputs.folders) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-
-      - name: Cache node_modules
-        uses: actions/cache@v1
-        with:
-          path: ~/.npm
-          key: node-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            node-
-
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ needs.get-stage-and-region.outputs.region }}
-
       - name: Setup Python
         uses: actions/setup-python@v3        
         with:
           python-version: '3.9'
       
-      - name: Install Dependencies
-        run: npm install
-
-      - name: Deploy Layer
+      - name: Comprobe Tests Files
         working-directory: ${{ matrix.folder }}
-        id: deploy-layer
+        id: comprobe_tests_files
         run: |
-          echo "${{ matrix.folder }}"
-          STAGE="${{ needs.get-stage-and-region.outputs.stage }}"
-          REGION="${{ needs.get-stage-and-region.outputs.region }}"
-          mkdir ./python
-          pip3 install -r setup/requirements -t python
-          cp -a ${{ matrix.folder }}/. python/
-          zip -r ${{ matrix.folder }}.zip python
-          rm -rf python
-          npx serverless deploy --stage $STAGE --region $REGION
-          rm -rf ${{ matrix.folder }}.zip
+          DIR="tests/"
+          if [ -d "$DIR" ]
+          then
+              if [ ! "$(ls -A $DIR)" ]; then
+                  echo "$DIR tests is Empty"
+                  exit 1
+              elif ! compgen -G "${DIR}/*_test.py" > /dev/null; then
+                  echo "In $DIR directory does not have test files."
+                  exit 1
+              fi
+          else
+              echo "Directory $DIR not found."
+          fi
+
+      - name: Test Function
+        working-directory: ${{ matrix.folder }}
+        id: run_tests
+        run: |
+          pip -q install pycodestyle
+          python -m unittest discover tests "*_test.py
+
+      # - name: Send Success Deploy Slack Message
+      #   continue-on-error: true
+      #   if: ${{ job.status == 'success' }}
+      #   uses: rtCamp/action-slack-notify@v2
+      #   env:
+      #     SLACK_COLOR: ${{ job.status }}
+      #     SLACK_TITLE: Resultado Test
+      #     SLACK_MESSAGE: Pruebas exitosas para ${{steps.run_tests.outputs.mix-test}}
+      #     SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+      #     SLACK_FOOTER: 'Tech'
+      
+      # - name: Send Error Deploy Slack Message
+      #   continue-on-error: true
+      #   if: failure()
+      #   uses: rtCamp/action-slack-notify@v2
+      #   env:
+      #     SLACK_COLOR: ${{ job.status }}
+      #     SLACK_TITLE: Resultado
+      #     SLACK_MESSAGE: Fallaron las pruebas para ${{steps.run_tests.outputs.mix-test}}
+      #     SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+      #     SLACK_FOOTER: 'Tech'
+
+  # get-pr-link:
+  #   runs-on: ubuntu-latest
+  #   outputs:
+  #     link: ${{ steps.get-link-pr.outputs.link }}      
+  #   steps:
+  #     - name: test PR
+  #       id: get-link-pr
+  #       run: |
+  #         LINK="https://github.com/${GITHUB_REPOSITORY}/pull/${{ github.event.number }}"
+  #         echo "::set-output name=link::$( echo "$LINK" )"          
+  # send-slack-message:
+  #   runs-on: ubuntu-latest
+  #   needs: ["get-pr-link"]
+  #   steps:
+  #     - uses: actions/checkout@v2
+  #     - name: send a slack message
+  #       uses: ./.github/actions/slack
+  #       with:
+  #         slack_webhook: ${{ secrets.SLACK_WEBHOOK }}
+  #         title: ":pr: Creación de PR para CR"
+  #         message: "Se ha creado el <${{ needs.get-pr-link.outputs.link }}|siguiente> PR"
+  # run-unit-tests:
+  #  runs-on: ubuntu-latest
+  #  steps:
+  #    - name: Checkout
+  #      uses: actions/checkout@v1
+  #    - name: Test file
+  #      run: |
+  #         python stack_project_1/services/project_1/lambda_1/test_name_function.py
+  
+
+    
