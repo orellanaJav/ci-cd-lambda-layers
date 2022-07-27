@@ -1,0 +1,20 @@
+service: test-layer
+custom:
+  bucket: ${param:bucket, "serverless-stack-deployments"}
+  pythonRequirements:
+    dockerizePip: non-linux
+  runtime: ${param:runtime, "python3.9"}
+
+provider:
+  deploymentBucket:
+    name: ${opt:stage, "dev"}-${self:custom.bucket}
+  name: aws
+  region: ${file(setup/${opt:stage, "dev"}/${opt:stage, "dev"}.json):REGION, "sa-east-1"}
+
+layers:
+  test_layer:
+    name: test_layer
+    compatibleRuntimes:
+      - ${self:custom.runtime}
+    package:
+      artifact: test_layer.zip
