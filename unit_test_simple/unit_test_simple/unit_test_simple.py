@@ -13,4 +13,3 @@ def unit_test_simple(params: dict) -> bool:
     """
 
     return True
-
