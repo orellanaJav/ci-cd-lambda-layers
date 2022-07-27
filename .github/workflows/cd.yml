@@ -109,7 +109,7 @@ jobs:
   deploy:
     needs: [get-stage-and-region, changes]
     name: Deploy
-    if: ${{ needs.changes.outputs.folders != '[]' }}
+    if: ${{ needs.changes.outputs.folders != '[]' && needs.changes.outputs.folders != '' }}
     strategy:
       matrix:
         folder: ${{ fromJSON(needs.changes.outputs.folders) }}
