@@ -156,7 +156,7 @@ jobs:
         id: run_tests
         run: |
           pip -q install pycodestyle
-          python -m unittest discover tests "*_test.py
+          echo "HOLA"
 
       # - name: Send Success Deploy Slack Message
       #   continue-on-error: true
