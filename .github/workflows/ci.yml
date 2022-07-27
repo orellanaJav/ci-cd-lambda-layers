@@ -73,19 +73,20 @@ jobs:
       - name: Check changed files
         id: diff
         run: |
-          git fetch origin ${{ github.event.before }} --depth=1
-          CURRENT_GITHUB_SHA=$GITHUB_SHA
-          BEFORE_GITHUB_SHA=${{ github.event.before }}
-          export DIFF=$( git diff --diff-filter=d --name-only $BEFORE_GITHUB_SHA $CURRENT_GITHUB_SHA )
-          if [ -z "${{ github.event.before }}" ]; then
-            PARENT_BRANCH=$( git show-branch -a | grep '\*' | grep -v `git rev-parse --abbrev-ref HEAD` | head -n1 | sed 's/.*\[\(.*\)\].*/\1/' | sed 's/[\^~].*//' )
-            git checkout $PARENT_BRANCH
-            BEFORE_GITHUB_SHA=${{ github.event.before }}
-            export DIFF=$( git diff --diff-filter=d --name-only $BEFORE_GITHUB_SHA $CURRENT_GITHUB_SHA )
+          if [ $GITHUB_BASE_REF ]; then
+            # Pull Request
+            git fetch origin $GITHUB_BASE_REF --depth=1
+            export DIFF=$( git diff --name-only origin/$GITHUB_BASE_REF $GITHUB_SHA )
+            echo "Diff between origin/$GITHUB_BASE_REF and $GITHUB_SHA"
+          else
+            # Push
+            git fetch origin ${{ github.event.before }} --depth=1
+            export DIFF=$( git diff --diff-filter=d --name-only ${{ github.event.before }} $GITHUB_SHA )
+            echo "Diff between ${{ github.event.before }} and $GITHUB_SHA"
           fi
-          echo "Diff between $BEFORE_GITHUB_SHA and $GITHUB_SHA"
           echo "$DIFF"
-          echo "::set-output name=diff::$( echo "$DIFF" | sed ':a;N;$!ba;s/\n/%0A/g' )" 
+          # Escape newlines (replace \n with %0A)
+          echo "::set-output name=diff::$( echo "$DIFF" | sed ':a;N;$!ba;s/\n/%0A/g' )"
       - name: Set matrix for build
         id: filter
         run: |
