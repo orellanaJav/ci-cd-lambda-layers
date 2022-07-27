@@ -2,10 +2,10 @@ name: CI Layers
 on:
   pull_request:
     branches:
-     - dev
-     - release
-     - prod
-     - crafting
+      - 'dev'
+      - 'release'
+      - 'main'
+      - 'crafting'
 
 env:
   DEV_REGION: sa-east-1  
