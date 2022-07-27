@@ -2,12 +2,12 @@ name: Delete Layer
 
 on:
   push:
-    # branches-ignore:
-    #   - '**'
-    branches:
-      - 'dev'
-      - 'release'
-      - 'main'
+    branches-ignore:
+      - '**'
+    # branches:
+    #   - 'dev'
+    #   - 'release'
+    #   - 'main'
 env:
   DEV_REGION: sa-east-1
   RELEASE_REGION: us-east-1
