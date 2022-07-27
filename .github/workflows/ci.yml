@@ -158,6 +158,7 @@ jobs:
           pip -q install pycodestyle
           pwd
           ls -la
+          python3 -m unittest discover ./tests/ "*_test.py
           echo "HOLA"
 
       # - name: Send Success Deploy Slack Message

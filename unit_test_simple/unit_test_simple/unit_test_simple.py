@@ -11,5 +11,4 @@ def unit_test_simple(params: dict) -> bool:
     :Created:
         - 2022.07.26
     """
-    print('si')
     return True
