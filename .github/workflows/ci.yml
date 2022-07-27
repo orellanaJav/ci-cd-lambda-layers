@@ -76,9 +76,11 @@ jobs:
           git fetch origin ${{ github.event.before }} --depth=1
           export DIFF=$( git diff --diff-filter=d --name-only ${{ github.event.before }} $GITHUB_SHA )
           echo "Diff between ${{ github.event.before }} and $GITHUB_SHA"
+          if [ -z "${{ github.event.before }}" ]; then
+            export DIFF=$( git show --name-only $GITHUB_SHA )
+          fi
           echo "$DIFF"
-          # Escape newlines (replace \n with %0A)
-          echo "::set-output name=diff::$( echo "$DIFF" | sed ':a;N;$!ba;s/\n/%0A/g' )"
+          echo "::set-output name=diff::$( echo "$DIFF" | sed ':a;N;$!ba;s/\n/%0A/g' )" 
       - name: Set matrix for build
         id: filter
         run: |
