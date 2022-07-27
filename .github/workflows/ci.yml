@@ -1,6 +1,6 @@
 name: CI Layers
 on:
-  pull_request:
+  push:
     branches:
      - dev
      - release
