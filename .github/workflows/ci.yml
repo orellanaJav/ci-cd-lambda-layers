@@ -76,7 +76,7 @@ jobs:
           if [ $GITHUB_BASE_REF ]; then
             # Pull Request
             git fetch origin $GITHUB_BASE_REF --depth=1
-            export DIFF=$( git diff --name-only origin/$GITHUB_BASE_REF $GITHUB_SHA )
+            export DIFF=$( git diff --diff-filter=d --name-only origin/$GITHUB_BASE_REF $GITHUB_SHA )
             echo "Diff between origin/$GITHUB_BASE_REF and $GITHUB_SHA"
           else
             # Push
