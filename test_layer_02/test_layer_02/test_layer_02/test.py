@@ -1,2 +1,2 @@
 def test():
-    return 'a'
+    return 'as'
